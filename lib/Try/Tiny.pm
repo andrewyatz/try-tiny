@@ -30,22 +30,21 @@ sub try (&;@) {
 	my $wantarray = wantarray;
 	
 	my ($catch, $finally);
-	
-	#If we had only one ref they try to decide if it was a catch or a finally
-	#Plan code refs are catches for backwards compatability
-	if(scalar(@code_refs) == 1) {
-	  my ($code) = @code_refs;
-	  my $ref = ref($code);
-	  if(defined $code) {
-	    if($ref eq 'CODE' || $ref eq 'Try::Tiny::Catch') { $catch = $code; }
-	    elsif($ref eq 'Try::Tiny::Finally') { $finally = $code; }
+	foreach my $code_ref (@code_refs) {
+	  next unless $code_ref; #Skip if the code ref was false (so undefined)
+	  my $ref = ref($code_ref);
+	  if($ref eq 'Try::Tiny::Catch') {
+	    $catch = ${$code_ref};
+	  }
+	  elsif($ref eq 'Try::Tiny::Finally') {
+	    $finally = ${$code_ref};
+	  }
+	  else {
+	    use Carp;
+	    confess("Unknown code ref type given '${ref}'. Check your usage & try again");
 	  }
 	}
-	#Otherwise just assign them in order & assume they are right
-	elsif(scalar(@code_refs) == 2) {
-	  ($catch,$finally) = @code_refs;
-	}
-	
+		
 	# save the value of $@ so we can set $@ back to it in the beginning of the eval
 	my $prev_error = $@;
 
@@ -114,13 +113,15 @@ sub try (&;@) {
 }
 
 sub catch (&;$) {
-  bless($_[0], 'Try::Tiny::Catch');
-  return @_ if wantarray;
-  return $_[0];
+  bless(\$_[0], 'Try::Tiny::Catch');
+  return (\$_[0], $_[1])  if wantarray && defined $_[1];
+  return \$_[0];
 }
 
-sub finally (&) {
-	return bless $_[0], 'Try::Tiny::Finally';
+sub finally (&;$) {
+	bless \$_[0], 'Try::Tiny::Finally';
+	return (\$_[0], $_[1]) if wantarray && defined $_[1];
+  return \$_[0];
 }
 
 __PACKAGE__
@@ -217,31 +218,17 @@ Once all execution is finished then the finally block if given will execute.
 
 Intended to be used in the second argument position of C<try>.
 
-Just returns the subroutine it was given.
+Returns a reference to the subroutine it was given but blessed as 
+C<Try::Tiny::Catch> which allows try to decode correctly what to do
+with this code reference.
 
 	catch { ... }
-
-is the same as
-
-	bless(sub { ... }, 'Try::Tiny::Catch');
 
 Inside the catch block the previous value of C<$@> is still available for use.
 This value may or may not be meaningful depending on what happened before the
 C<try>, but it might be a good idea to preserve it in an error stack.
 
-If two args are given to C<try> (try block & something else) the code attempts
-to decide what this second parameter was according to this logic.
-
-  *  Parameter was defined then allow further checks
-
-  *  C<ref>'s result was C<CODE> or C<Try::Tiny::Catch> then treat as a catch block
-
-  *  C<ref>'s result was C<Try::Tiny::Finally> then treat as a finally block
-
-If 3 parameters were given the the subroutine assumes that position C<[1]> is the 
-catch block and position C<[2]> is the finally block.
-
-=item finally (&)
+=item finally (&;$)
 
   try     { ... }
   catch   { ... }
@@ -251,6 +238,12 @@ Or
 
   try     { ... }
   finally { ... };
+  
+Or even
+
+  try     { ... }
+  finally { ... }
+  catch   { ... };
 
 Intended to be the second or third element of C<try>. Finally blocks are always
 executed in the event of a successful C<try> or if C<catch> is run. This allows
@@ -260,6 +253,9 @@ handle.
 B<You must always do your own error handling in the finally block>. C<Try::Tiny> will
 not do anything about handling possible errors coming from code located in these
 blocks.
+
+In the same way C<catch()> blesses the code reference this subroutine does the same
+except it bless them as C<Try::Tiny::Finally>.
 
 =back
 

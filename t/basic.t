@@ -77,9 +77,9 @@ is_deeply( [ try {qw(foo bar gorch)} ], [qw(foo bar gorch)], "list context" );
 
 {
   my $sub = catch { my $a = $_; };
-  is(ref($sub), 'Try::Tiny::Catch', 'Checking catch subroutine is correctly blessed');
+  is(ref($sub), 'Try::Tiny::Catch', 'Checking catch subroutine scalar reference is correctly blessed');
   my $sub = finally { my $a = $_; };
-  is(ref($sub), 'Try::Tiny::Finally', 'Checking catch subroutine is correctly blessed');
+  is(ref($sub), 'Try::Tiny::Finally', 'Checking finally subroutine scalar reference is correctly blessed');
 }
 
 lives_ok {

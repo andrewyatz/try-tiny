@@ -3,7 +3,7 @@
 use strict;
 #use warnings;
 
-use Test::More tests => 8;
+use Test::More tests => 7;
 
 BEGIN { use_ok 'Try::Tiny' };
 
@@ -27,20 +27,16 @@ try {
 try {
   die('Die');
 } finally {
+  pass('Moved into finally from catch');
+} catch {
+  ok($_ =~ /Die/, 'Error text as expected');
+};
+
+try {
+  die('Die');
+} finally {
   pass('Moved into finally block when try throws an exception and we have no catch block');
 };
 
-{
-  my $catch   = sub { pass('in unblessed catch'); };
-  my $finally = sub { pass('in unblessed finally'); };
-  
-  try {
-    die('DIE!');
-  } $catch;
-  
-  try {
-    die('DIE!');
-  } $catch, $finally;
-}
 
 1;
