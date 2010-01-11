@@ -14,17 +14,38 @@ $VERSION = "0.02";
 
 $VERSION = eval $VERSION;
 
-@EXPORT = @EXPORT_OK = qw(try catch);
+@EXPORT = @EXPORT_OK = qw(try catch finally);
 
 $Carp::Internal{+__PACKAGE__}++;
 
-sub try (&;$) {
-	my ( $try, $catch ) = @_;
+# Need to prototype as @ not $$ because of the way Perl evaluates the prototype.
+# Keeping it at $$ means you only ever get 1 sub because we need to eval in a list
+# context & not a scalar one
+
+sub try (&;@) {
+	my ( $try, @code_refs ) = @_;
 
 	# we need to save this here, the eval block will be in scalar context due
 	# to $failed
 	my $wantarray = wantarray;
-
+	
+	my ($catch, $finally);
+	
+	#If we had only one ref they try to decide if it was a catch or a finally
+	#Plan code refs are catches for backwards compatability
+	if(scalar(@code_refs) == 1) {
+	  my ($code) = @code_refs;
+	  my $ref = ref($code);
+	  if(defined $code) {
+	    if($ref eq 'CODE' || $ref eq 'Try::Tiny::Catch') { $catch = $code; }
+	    elsif($ref eq 'Try::Tiny::Finally') { $finally = $code; }
+	  }
+	}
+	#Otherwise just assign them in order & assume they are right
+	elsif(scalar(@code_refs) == 2) {
+	  ($catch,$finally) = @code_refs;
+	}
+	
 	# save the value of $@ so we can set $@ back to it in the beginning of the eval
 	my $prev_error = $@;
 
@@ -69,7 +90,13 @@ sub try (&;$) {
 			# This works like given($error), but is backwards compatible and
 			# sets $_ in the dynamic scope for the body of C<$catch>
 			for ($error) {
-				return $catch->($error);
+				my $catch_return = $catch->($error);
+				
+				# Finally blocks run after all other blocks so it is executed here
+				$finally->() if ( $finally );
+				
+				#And return whatever catch returned
+				return $catch_return;
 			}
 
 			# in case when() was used without an explicit return, the C<for>
@@ -78,15 +105,23 @@ sub try (&;$) {
 
 		return;
 	} else {
+	  # Execute finally block once we decided we worked
+	  $finally->() if ( $finally );
+	  
 		# no failure, $@ is back to what it was, everything is fine
 		return $wantarray ? @ret : $ret[0];
 	}
 }
 
-sub catch (&) {
-	return $_[0];
+sub catch (&;$) {
+  bless($_[0], 'Try::Tiny::Catch');
+  return @_ if wantarray;
+  return $_[0];
 }
 
+sub finally (&) {
+	return bless $_[0], 'Try::Tiny::Finally';
+}
 
 __PACKAGE__
 
@@ -114,7 +149,7 @@ Try::Tiny - minimal try/catch with proper localization of $@
 
 =head1 DESCRIPTION
 
-This module provides bare bones C<try>/C<catch> statements that are designed to
+This module provides bare bones C<try>/C<catch>/C<finally> statements that are designed to
 minimize common mistakes with eval blocks, and NOTHING else.
 
 This is unlike L<TryCatch> which provides a nice syntax and avoids adding
@@ -140,19 +175,29 @@ assign C<"bar"> to C<$x>.
 	my $x = try { die "foo" } catch { "bar" };
 
 	my $x = eval { die "foo" } || "bar";
+	
+You can add finally blocks making the following true.
+
+  my $x;
+  try { die 'foo' } finally { $x = 'bar' };
+  try { die 'foo' } catch { warn "Got a die: $_" } finally { $x = 'bar' };
+
+Finally blocks are always executed making them suitable for cleanup code
+which cannot be handled using local.
 
 =head1 EXPORTS
 
 All functions are exported by default using L<Exporter>.
 
-If you need to rename the C<try> or C<catch> keyword consider using
+If you need to rename the C<try>, C<catch> or C<finally> keyword consider using
 L<Sub::Import> to get L<Sub::Exporter>'s flexibility.
 
 =over 4
 
-=item try (&;$)
+=item try (&;@)
 
-Takes one mandatory try subroutine and one optional catch subroutine.
+Takes one mandatory try subroutine, an optional catch subroutine & finally 
+subroutine.
 
 The mandatory subroutine is evaluated in the context of an C<eval> block.
 
@@ -166,7 +211,9 @@ argument.
 Note that the error may be false, but if that happens the C<catch> block will
 still be invoked.
 
-=item catch (&)
+Once all execution is finished then the finally block if given will execute.
+
+=item catch (&;$)
 
 Intended to be used in the second argument position of C<try>.
 
@@ -176,11 +223,43 @@ Just returns the subroutine it was given.
 
 is the same as
 
-	sub { ... }
+	bless(sub { ... }, 'Try::Tiny::Catch');
 
 Inside the catch block the previous value of C<$@> is still available for use.
 This value may or may not be meaningful depending on what happened before the
 C<try>, but it might be a good idea to preserve it in an error stack.
+
+If two args are given to C<try> (try block & something else) the code attempts
+to decide what this second parameter was according to this logic.
+
+  *  Parameter was defined then allow further checks
+
+  *  C<ref>'s result was C<CODE> or C<Try::Tiny::Catch> then treat as a catch block
+
+  *  C<ref>'s result was C<Try::Tiny::Finally> then treat as a finally block
+
+If 3 parameters were given the the subroutine assumes that position C<[1]> is the 
+catch block and position C<[2]> is the finally block.
+
+=item finally (&)
+
+  try     { ... }
+  catch   { ... }
+  finally { ... };
+  
+Or
+
+  try     { ... }
+  finally { ... };
+
+Intended to be the second or third element of C<try>. Finally blocks are always
+executed in the event of a successful C<try> or if C<catch> is run. This allows
+you to locate cleanup code which cannot be done via C<local()> e.g. closing a file
+handle.
+
+B<You must always do your own error handling in the finally block>. C<Try::Tiny> will
+not do anything about handling possible errors coming from code located in these
+blocks.
 
 =back
 
